@@ -6,10 +6,11 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useActionData, useSearchParams } from "@remix-run/react";
 import { useEffect, useRef } from "react";
+import { z } from "zod";
 
 import { verifyLogin } from "~/models/user.server";
 import { createUserSession, getUserId } from "~/session.server";
-import { safeRedirect, validateEmail } from "~/utils";
+import { safeRedirect } from "~/utils";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const userId = await getUserId(request);
@@ -24,28 +25,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const redirectTo = safeRedirect(formData.get("redirectTo"), "/");
   const remember = formData.get("remember");
 
-  if (!validateEmail(email)) {
+  const schema = z.object({
+    email: z.string().email({ message: "Email is invalid" }),
+    password: z.string().min(8, { message: "Password is too short" }),
+  });
+
+  const schemaResult = schema.safeParse({ email: email, password: password });
+
+  if (!schemaResult.success) {
     return json(
-      { errors: { email: "Email is invalid", password: null } },
+      {
+        errors: {
+          email: schemaResult.error.flatten().fieldErrors.email?.[0] || null,
+          password:
+            schemaResult.error.flatten().fieldErrors.password?.[0] || null,
+        },
+      },
       { status: 400 },
     );
   }
 
-  if (typeof password !== "string" || password.length === 0) {
-    return json(
-      { errors: { email: null, password: "Password is required" } },
-      { status: 400 },
-    );
-  }
-
-  if (password.length < 8) {
-    return json(
-      { errors: { email: null, password: "Password is too short" } },
-      { status: 400 },
-    );
-  }
-
-  const user = await verifyLogin(email, password);
+  const user = await verifyLogin(email as string, password as string);
 
   if (!user) {
     return json(
@@ -94,11 +94,10 @@ export default function LoginPage() {
               <input
                 ref={emailRef}
                 id="email"
-                required
                 // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus={true}
-                name="email"
                 type="email"
+                name="email"
                 autoComplete="email"
                 aria-invalid={actionData?.errors?.email ? true : undefined}
                 aria-describedby="email-error"
@@ -106,7 +105,8 @@ export default function LoginPage() {
               />
               {actionData?.errors?.email ? (
                 <div className="pt-1 text-red-700" id="email-error">
-                  {actionData.errors.email}
+                  {" "}
+                  {actionData.errors.email}{" "}
                 </div>
               ) : null}
             </div>
