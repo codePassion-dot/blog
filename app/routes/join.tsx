@@ -6,10 +6,11 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useActionData, useSearchParams } from "@remix-run/react";
 import { useEffect, useRef } from "react";
+import { z } from "zod";
 
 import { createUser, getUserByEmail } from "~/models/user.server";
 import { createUserSession, getUserId } from "~/session.server";
-import { safeRedirect, validateEmail } from "~/utils";
+import { safeRedirect } from "~/utils";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const userId = await getUserId(request);
@@ -23,28 +24,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const password = formData.get("password");
   const redirectTo = safeRedirect(formData.get("redirectTo"), "/");
 
-  if (!validateEmail(email)) {
+  const schema = z.object({
+    email: z.string().email({ message: "Email is invalid" }),
+    password: z.string().min(8, { message: "Password is too short" }),
+  });
+
+  const schemaResult = schema.safeParse({ email: email, password: password });
+
+  if (!schemaResult.success) {
     return json(
-      { errors: { email: "Email is invalid", password: null } },
+      {
+        errors: {
+          email: schemaResult.error.flatten().fieldErrors.email?.[0] || null,
+          password:
+            schemaResult.error.flatten().fieldErrors.password?.[0] || null,
+        },
+      },
       { status: 400 },
     );
   }
 
-  if (typeof password !== "string" || password.length === 0) {
-    return json(
-      { errors: { email: null, password: "Password is required" } },
-      { status: 400 },
-    );
-  }
-
-  if (password.length < 8) {
-    return json(
-      { errors: { email: null, password: "Password is too short" } },
-      { status: 400 },
-    );
-  }
-
-  const existingUser = await getUserByEmail(email);
+  const existingUser = await getUserByEmail(email as string);
   if (existingUser) {
     return json(
       {
@@ -57,7 +57,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const user = await createUser(email, password);
+  const user = await createUser(email as string, password as string);
 
   return createUserSession({
     redirectTo,
@@ -87,7 +87,7 @@ export default function Join() {
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md px-8">
-        <Form method="post" className="space-y-6">
+        <Form noValidate method="post" className="space-y-6">
           <div>
             <label
               htmlFor="email"
@@ -99,7 +99,6 @@ export default function Join() {
               <input
                 ref={emailRef}
                 id="email"
-                required
                 // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus={true}
                 name="email"
